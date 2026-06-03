@@ -1,0 +1,6 @@
+{
+  "name": "AI Subtitle Video Player",
+  "description": "Automatically extract audio and generate, customize, edit, and export AI transcripts or sync subtitles on device.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
