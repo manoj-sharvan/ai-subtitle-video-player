@@ -46,7 +46,7 @@ object ChunkTranscriber {
             if (chunkDuration <= 0) continue
 
             val baseProgress = (i.toFloat() / totalChunks * 80).toInt()
-            onProgress(10 + baseProgress, "Processing segment ${i + 1} of $totalChunks...")
+            onProgress(10 + baseProgress, "Transcribing... Chunk ${i + 1} / $totalChunks")
 
             // Run Whisper on the localized chunk region
             val chunkBlocks = WhisperEngine.transcribe(
@@ -56,7 +56,7 @@ object ChunkTranscriber {
                 modelName = modelName
             ) { p ->
                 val chunkProgress = baseProgress + ((p.toFloat() / 100) * (80f / totalChunks)).toInt()
-                onProgress(10 + chunkProgress, "Transcribing segment ${i + 1}/$totalChunks: $p%")
+                onProgress(10 + chunkProgress, "Transcribing... Chunk ${i + 1} / $totalChunks (${p}%)")
             }
 
             // Adjust block offsets to match the global timeline

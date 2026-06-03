@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.VideoFile
 import com.example.ui.viewmodel.SubtitlePlayerViewModel
+import com.example.data.localai.model.ModelState
 
 @OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +37,9 @@ fun GeneratorScreen(
     val currentStep by viewModel.transcriptionStep.collectAsState()
     val isProcessingAI by viewModel.isProcessingAI.collectAsState()
     val aiResultText by viewModel.aiResultText.collectAsState()
+    
+    val whisperStates by viewModel.whisperModelStates.collectAsState()
+    val llmStates by viewModel.llmModelStates.collectAsState()
 
     var selectedLang by remember { mutableStateOf("English") }
     var isOfflineMode by remember { mutableStateOf(true) }
@@ -247,6 +251,79 @@ fun GeneratorScreen(
                                     Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Start Generator", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("On-Device AI Models", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("Download recommended AI models to transcribe and refine offline. All models are stored locally on your device.", color = Color.Gray, fontSize = 12.sp)
+
+                            listOf(
+                                "Whisper Tiny" to "78 MB - Speech Recognition",
+                                "Whisper Base" to "148 MB - High-accuracy Speech",
+                                "Qwen 2.5 1.5B" to "980 MB - LLM Refiner & Translator"
+                            ).forEach { (modelName, desc) ->
+                                val state = if (modelName.contains("Qwen")) llmStates[modelName] else whisperStates[modelName]
+                                val displayState = state ?: ModelState.NotDownloaded
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF334155).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(modelName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(desc, color = Color.Gray, fontSize = 11.sp)
+                                        
+                                        when (displayState) {
+                                            is ModelState.Downloading -> {
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                LinearProgressIndicator(
+                                                    progress = displayState.progress / 100f,
+                                                    color = Color(0xFFEC4899),
+                                                    modifier = Modifier.fillMaxWidth().height(4.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text("Downloading... ${displayState.progress}%", color = Color(0xFFEC4899), fontSize = 10.sp)
+                                            }
+                                            is ModelState.Verifying -> {
+                                                Text("Verifying checksum...", color = Color.Yellow, fontSize = 10.sp)
+                                            }
+                                            is ModelState.Failed -> {
+                                                Text("Error: ${displayState.error}", color = Color.Red, fontSize = 10.sp)
+                                            }
+                                            else -> {}
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    when (displayState) {
+                                        is ModelState.Ready -> {
+                                            Icon(Icons.Default.CheckCircle, contentDescription = "Installed", tint = Color(0xFF10B981))
+                                        }
+                                        is ModelState.Downloading, is ModelState.Verifying -> {
+                                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color(0xFFEC4899), strokeWidth = 2.dp)
+                                        }
+                                        else -> {
+                                            Button(
+                                                onClick = { viewModel.downloadModel(modelName) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC4899)),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                                modifier = Modifier.height(30.dp)
+                                            ) {
+                                                Text("Download", fontSize = 10.sp, color = Color.White)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

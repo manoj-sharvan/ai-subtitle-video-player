@@ -31,6 +31,38 @@ class SubtitleGenerationWorker(
         const val KEY_PROGRESS = "PROGRESS"
         const val KEY_STATUS = "STATUS"
         const val KEY_FINISHED = "FINISHED"
+
+        fun enqueue(
+            context: Context,
+            videoId: Long,
+            videoUri: String,
+            videoTitle: String,
+            videoDuration: Long,
+            language: String,
+            modelName: String
+        ) {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiresBatteryNotLow(true)
+                .setRequiresStorageNotLow(true)
+                .build()
+
+            val workData = androidx.work.workDataOf(
+                KEY_VIDEO_ID to videoId,
+                KEY_VIDEO_URI to videoUri,
+                KEY_VIDEO_TITLE to videoTitle,
+                KEY_VIDEO_DURATION to videoDuration,
+                KEY_LANGUAGE to language,
+                KEY_MODEL_NAME to modelName
+            )
+
+            val workRequest = androidx.work.OneTimeWorkRequestBuilder<SubtitleGenerationWorker>()
+                .setConstraints(constraints)
+                .setInputData(workData)
+                .addTag("SubtitleGen_$videoId")
+                .build()
+
+            androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
+        }
     }
 
     override suspend fun doWork(): Result {

@@ -10,7 +10,7 @@ class LocalRagPipeline {
      * Re-indexes the transcript chunks for a video.
      */
     fun indexSubtitles(blocks: List<SubtitleBlock>) {
-        indexedChunks = TranscriptIndexer.index(blocks)
+        indexedChunks = TfIdfIndexer.index(blocks)
     }
 
     /**

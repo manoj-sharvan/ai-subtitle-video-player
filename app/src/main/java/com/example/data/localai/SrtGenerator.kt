@@ -8,8 +8,41 @@ object SrtGenerator {
      * Compiles list of subtitle blocks into a standard formatted SRT string.
      */
     fun generateSrtContent(blocks: List<SubtitleBlock>): String {
+        val validatedBlocks = mutableListOf<SubtitleBlock>()
+        var prevEndTimeMs = 0L
+
+        blocks.sortedBy { it.startTimeMs }.forEach { block ->
+            var start = block.startTimeMs
+            var end = block.endTimeMs
+
+            // 1. Validation check for negative times
+            if (start < 0L) start = 0L
+            if (end < 0L) end = 0L
+
+            // 2. Validation check for start < end
+            if (end <= start) {
+                end = start + 1000L // Force 1-second duration if invalid
+            }
+
+            // 3. Validation check for overlapping intervals (self-healing)
+            if (start < prevEndTimeMs) {
+                start = prevEndTimeMs
+                if (end <= start) {
+                    end = start + 1000L
+                }
+            }
+
+            validatedBlocks.add(
+                block.copy(
+                    startTimeMs = start,
+                    endTimeMs = end
+                )
+            )
+            prevEndTimeMs = end
+        }
+
         val sb = StringBuilder()
-        blocks.forEach { block ->
+        validatedBlocks.forEach { block ->
             sb.append("${block.index}\n")
             sb.append("${formatTime(block.startTimeMs)} --> ${formatTime(block.endTimeMs)}\n")
             if (block.speaker != null) {

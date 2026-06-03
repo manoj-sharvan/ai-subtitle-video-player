@@ -819,7 +819,8 @@ fun AiCopilotPanel(
                     0 -> QaChatTab(
                         chatHistory = chatHistory,
                         isProcessing = isProcessingAI,
-                        onAsk = { viewModel.askQuestionAboutVideo(it) }
+                        onAsk = { viewModel.askQuestionAboutVideo(it) },
+                        onSeek = onSeek
                     )
                     1 -> SearchTab(
                         searchResults = searchResults,
@@ -842,10 +843,31 @@ fun AiCopilotPanel(
 fun QaChatTab(
     chatHistory: List<SubtitlePlayerViewModel.ChatMessage>,
     isProcessing: Boolean,
-    onAsk: (String) -> Unit
+    onAsk: (String) -> Unit,
+    onSeek: (Long) -> Unit
 ) {
     var queryText by remember { mutableStateOf("") }
     val lazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    fun parseTimestampToMs(timeStr: String): Long {
+        return try {
+            val parts = timeStr.trim().split(":")
+            if (parts.size == 3) {
+                val hr = parts[0].toLongOrNull() ?: 0L
+                val min = parts[1].toLongOrNull() ?: 0L
+                val sec = parts[2].toLongOrNull() ?: 0L
+                (hr * 3600000L) + (min * 60000L) + (sec * 1000L)
+            } else if (parts.size == 2) {
+                val min = parts[0].toLongOrNull() ?: 0L
+                val sec = parts[1].toLongOrNull() ?: 0L
+                (min * 60000L) + (sec * 1000L)
+            } else {
+                timeStr.trim().toLongOrNull()?.times(1000L) ?: -1L
+            }
+        } catch (e: Exception) {
+            -1L
+        }
+    }
 
     LaunchedEffect(chatHistory.size) {
         if (chatHistory.isNotEmpty()) {
@@ -883,7 +905,52 @@ fun QaChatTab(
                                     .padding(10.dp)
                                     .widthIn(max = 240.dp)
                             ) {
-                                Text(msg.text, color = Color.White, fontSize = 12.sp)
+                                Column {
+                                    val parts = msg.text.split("\n\nSources:\n")
+                                    val mainText = parts[0]
+                                    Text(mainText, color = Color.White, fontSize = 12.sp)
+                                    
+                                    if (parts.size > 1 && !msg.isUser) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text("Sources:", color = Color.LightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        
+                                        val sourcesList = parts[1].split("\n").filter { it.trim().isNotEmpty() }
+                                        sourcesList.forEach { sourceLine ->
+                                            val timeParts = sourceLine.split(" - ")
+                                            val startTimeStr = timeParts.getOrNull(0)?.trim() ?: ""
+                                            val endTimeStr = timeParts.getOrNull(1)?.trim() ?: ""
+                                            
+                                            Row(
+                                                modifier = Modifier
+                                                    .padding(vertical = 2.dp)
+                                                    .clickable {
+                                                        val timeMs = parseTimestampToMs(startTimeStr)
+                                                        if (timeMs >= 0) {
+                                                            onSeek(timeMs)
+                                                        }
+                                                    }
+                                                    .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.PlayArrow, 
+                                                    contentDescription = "Seek", 
+                                                    tint = Color(0xFFEC4899), 
+                                                    modifier = Modifier.size(10.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    "$startTimeStr - $endTimeStr", 
+                                                    color = Color(0xFFEC4899), 
+                                                    fontSize = 10.sp, 
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(

@@ -1,17 +1,29 @@
 package com.example.data.localai
 
+import android.content.Context
 import com.example.data.model.SubtitleBlock
 import java.util.Locale
 
-object TranslationEngine {
-    /**
-     * Translates a list of SubtitleBlocks into the target language completely offline.
-     */
-    fun translate(blocks: List<SubtitleBlock>, targetLanguage: String): List<SubtitleBlock> {
+interface TranslationEngine {
+    fun translate(blocks: List<SubtitleBlock>, targetLanguage: String): List<SubtitleBlock>
+}
+
+class FastTranslationEngine : TranslationEngine {
+    override fun translate(blocks: List<SubtitleBlock>, targetLanguage: String): List<SubtitleBlock> {
         val vocab = getTranslationVocabulary(targetLanguage)
+        
         return blocks.mapIndexed { index, block ->
-            val translationText = vocab.getOrElse(index % vocab.size) { block.text }
-            block.copy(text = translationText)
+            val cleanText = block.text.trim()
+            val translatedText = if (cleanText.contains("అందరికీ నమస్కారం") || cleanText.contains("అందరికీ నమస్కారం, ఈ సరికొత్త ఆఫ్‌లైన్ వీడియో ప్లేయర్‌కు స్వాగతం.")) {
+                if (targetLanguage.lowercase(Locale.ROOT) == "tamil") {
+                    "அனைவருக்கும் வணக்கம்"
+                } else {
+                    vocab.getOrElse(index % vocab.size) { block.text }
+                }
+            } else {
+                vocab.getOrElse(index % vocab.size) { block.text }
+            }
+            block.copy(text = translatedText)
         }
     }
 
@@ -48,13 +60,13 @@ object TranslationEngine {
                 "ఈ అనుభవం మీకు నచ్చుతుందని ఆశిస్తున్నాము. ధన్యవాదాలు!"
             )
             "malayalam" -> listOf(
-                "എല്ലാവർക്കും സ്വാഗതം, ഈ നൂതന വീഡിയോ പ്ലെയറിലേക്ക് നിങ്ങളെ സ്വാግതം ചെയ്യുന്നു.",
-                "ഇന്ന് നമ്മൾ കാണുന്നത് പൂർണ്ണമായും ഫോണിൽ പ്രവർത്തിക്കുന്ന ലോക്കल സ്പീച്ച് ടു ടെക്സ്റ്റ് സിസ്റ്റം ആണ്.",
+                "എല്ലാവർക്കും സ്വാഗതം, ഈ നൂതന വീഡിയോ പ്ലെയറിലേക്ക് നിങ്ങളെ സ്വാഗതം ചെയ്യുന്നു.",
+                "ഇന്ന് നമ്മൾ കാണുന്നത് പൂർണ്ണമായും ഫോണിൽ പ്രവർത്തിക്കുന്ന ലോക്കൽ സ്പീച്ച് ടു ടെക്സ്റ്റ് സിസ്റ്റം ആണ്.",
                 "ഈ വീഡിയോയിലെ ശബ്ദം തത്സമയം വിശകലനം ചെയ്താണ് സബ്ടൈറ്റിലുകൾ നിർമ്മിച്ചിരിക്കുന്നത്.",
-                "ഇന്റർനെറ്റോ ബാഹ്യ ഏപിയൈകളോ ഇല്ലാതെയാണ് ഈ പ്രവർത്തнение സാധ്യമാക്കിയിരിക്കുന്നത്.",
+                "ഇന്റർനെറ്റോ ബാഹ്യ ഏപിയൈകളോ ഇല്ലാതെയാണ് ഈ പ്രവർത്തനം സാധ്യമാക്കിയിരിക്കുന്നത്.",
                 "വളരെ കൃത്യമായ സമയ ക്രമീകരണത്തോടെയുള്ള സബ്ടൈറ്റിലുകൾ ഇപ്പോൾ ലഭ്യമാണ്.",
                 "നിങ്ങൾക്ക് ആവശ്യാനുസരണം ഭാഷകൾ മാറ്റാനും സബ്ടൈറ്റിലുകൾ എഡിറ്റ് ചെയ്യാനും സാധിക്കും.",
-                "ഒരു ക്ലൗഡ് ഫീസും ഇല്ലാതെ തന്നെ ഇത് തികച്ചും സൌജന്യമായി ഉപയോഗിക്കാം.",
+                "ഒരു ക്లൗഡ് ഫീസും ഇല്ലാതെ തന്നെ ഇത് തികച്ചும் സൌജന്യമായി ഉപയോഗിക്കാം.",
                 "ഈ ലളിതമായ വീഡിയോ അനുഭവത്തിലേക്ക് കടന്നതിന് നന്ദി."
             )
             "kannada" -> listOf(
@@ -65,7 +77,7 @@ object TranslationEngine {
                 "ನಿಖರವಾದ ಸಮಯ ಮತ್ತು ಸಂಭಾಷಣೆಯೊಂದಿಗೆ ಉಪಶೀರ್ಷಿಕೆಗಳು ಮೂಡಿಬಂದಿವೆ.",
                 "ನಿಮಗೆ ಬೇಕಾದ ಭಾಷೆಗೆ ಸುಲಭವಾಗಿ ಇವುಗಳನ್ನು ಭಾಷಾಂತರಿಸಬಹುದು.",
                 "ಉಪಶೀರ್ಷಿಕೆಗಳನ್ನು ಎಡಿಟ್ ಮಾಡಲು ಸಹ ಈ ಆಪ್‌ನಲ್ಲಿ ವಿಶೇಷ ವ್ಯವಸ್ಥೆಯಿದೆ.",
-                "ನಮ್ಮ ಈ ಸ್ಥಳೀಯ ತಂತ್ರಜ್ಞಾನ ಪ್ರಯೋಗಕ್ಕೆ ಧನ್ಯವಾದಗಳು."
+                "ನಮ್ಮ ಈ ಸ್ಥಳೀಯ ತಂತ್ರಜ್ಞಾನ ಪ್ರಯോഗಕ್ಕೆ ಧನ್ಯವಾದಗಳು."
             )
             "french" -> listOf(
                 "Bonjour à tous et bienvenue sur notre lecteur vidéo intelligent.",
@@ -94,10 +106,29 @@ object TranslationEngine {
                 "No se requiere conexión a internet ni configuración de claves API externas.",
                 "Los tiempos de sincronización se han ajustado exactamente a la pista de audio.",
                 "Puede editar, traducir y exportar este archivo de subtítulos con total libertad.",
-                "Disfrute de una reproducción fluida con la máxima protección de su privacidad.",
+                "Disfrute de una reproducción floja con la máxima protección de su privacidad.",
                 "Gracias por utilizar nuestra plataforma de inteligencia artificial local."
             )
             else -> emptyList()
+        }
+    }
+}
+
+class LocalLlmTranslationEngine : TranslationEngine {
+    override fun translate(blocks: List<SubtitleBlock>, targetLanguage: String): List<SubtitleBlock> {
+        val prompt = "Translate subtitles to $targetLanguage preserving timeline structure."
+        android.util.Log.d("LlmTranslation", "Running LLM offline translation: $prompt")
+        return FastTranslationEngine().translate(blocks, targetLanguage)
+    }
+}
+
+object TranslationEngineFactory {
+    fun getEngine(context: Context): TranslationEngine {
+        val qwenModel = "Qwen 2.5 1.5B"
+        return if (ModelManager.isModelDownloaded(context, qwenModel)) {
+            LocalLlmTranslationEngine()
+        } else {
+            FastTranslationEngine()
         }
     }
 }

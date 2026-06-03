@@ -1,22 +1,58 @@
 package com.example.data.localai
 
+import android.content.Context
+import android.util.Log
 import com.example.data.localai.model.RagChunk
 import com.example.data.model.SubtitleBlock
+import java.io.File
 
 object LocalLLMEngine {
+    private const val TAG = "LocalLLMEngine"
+
+    var isNativeLoaded = false
+        private set
+
+    // Toggleable developer flag to allow running simulated LLM inference
+    // on emulators/devices where llama.cpp native libraries are not yet built.
+    var devSimulationEnabled = true
+
+    init {
+        try {
+            System.loadLibrary("llama")
+            isNativeLoaded = true
+            Log.i(TAG, "Successfully loaded native llama JNI library.")
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "Native llama library not found; JNI calls will not be available.")
+            isNativeLoaded = false
+        }
+    }
+
+    // JNI llama.cpp Native Bindings
+    @JvmStatic
+    private external fun loadModel(modelPath: String): Long
+    @JvmStatic
+    private external fun freeModel(modelPtr: Long)
+    @JvmStatic
+    private external fun initContext(modelPtr: Long, contextSize: Int): Long
+    @JvmStatic
+    private external fun freeContext(contextPtr: Long)
+    @JvmStatic
+    private external fun generateCompletion(contextPtr: Long, prompt: String, maxTokens: Int): String
 
     /**
      * Cleans up punctuation, capitalization, and segments.
      */
     fun refineSubtitles(blocks: List<SubtitleBlock>): List<SubtitleBlock> {
+        Log.d(TAG, "Refining subtitles using Local LLM...")
         return SubtitleRefiner.refine(blocks)
     }
 
     /**
-     * Translates subtitles offline.
+     * Translates subtitles offline using dynamic factory resolving.
      */
-    fun translateSubtitles(blocks: List<SubtitleBlock>, targetLanguage: String): List<SubtitleBlock> {
-        return TranslationEngine.translate(blocks, targetLanguage)
+    fun translateSubtitles(context: Context, blocks: List<SubtitleBlock>, targetLanguage: String): List<SubtitleBlock> {
+        val engine = TranslationEngineFactory.getEngine(context)
+        return engine.translate(blocks, targetLanguage)
     }
 
     /**
@@ -31,7 +67,6 @@ object LocalLLMEngine {
      */
     fun extractKeywords(blocks: List<SubtitleBlock>): List<String> {
         if (blocks.isEmpty()) return emptyList()
-        // Extract top words that are nouns/concepts
         val stopWords = setOf(
             "the", "and", "this", "that", "with", "from", "your", "welcome", "about", "video", "player"
         )

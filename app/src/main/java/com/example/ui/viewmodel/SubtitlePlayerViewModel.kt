@@ -34,6 +34,10 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import com.example.data.db.PlaybackHistory
 import com.example.data.db.SubtitleSettings
+import com.example.data.localai.model.ModelState
+import com.example.data.localai.ModelRegistry
+import com.example.data.localai.ModelManager
+import com.example.data.localai.ModelDownloader
 
 private data class VideoSearchParams(val query: String, val folder: String?, val favOnly: Boolean, val sort: String)
 
@@ -129,6 +133,12 @@ class SubtitlePlayerViewModel(
     private val _themeMode = MutableStateFlow("SYSTEM")
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
 
+    private val _whisperModelStates = MutableStateFlow<Map<String, ModelState>>(emptyMap())
+    val whisperModelStates: StateFlow<Map<String, ModelState>> = _whisperModelStates.asStateFlow()
+
+    private val _llmModelStates = MutableStateFlow<Map<String, ModelState>>(emptyMap())
+    val llmModelStates: StateFlow<Map<String, ModelState>> = _llmModelStates.asStateFlow()
+
     // --- Chat Message structure ---
     data class ChatMessage(
         val text: String,
@@ -176,9 +186,43 @@ class SubtitlePlayerViewModel(
         _chatHistory.value = emptyList()
     }
 
+    fun refreshModelStatuses() {
+        val whisperMap = mutableMapOf<String, ModelState>()
+        ModelRegistry.whisperModels.forEach { info ->
+            val isDownloaded = ModelManager.isModelDownloaded(getApplication(), info.name)
+            whisperMap[info.name] = if (isDownloaded) ModelState.Ready else ModelState.NotDownloaded
+        }
+        _whisperModelStates.value = whisperMap
+
+        val llmMap = mutableMapOf<String, ModelState>()
+        ModelRegistry.llmModels.forEach { info ->
+            val isDownloaded = ModelManager.isModelDownloaded(getApplication(), info.name)
+            llmMap[info.name] = if (isDownloaded) ModelState.Ready else ModelState.NotDownloaded
+        }
+        _llmModelStates.value = llmMap
+    }
+
+    fun downloadModel(modelName: String) {
+        viewModelScope.launch {
+            ModelDownloader.downloadModel(getApplication(), modelName) { state ->
+                val isWhisper = ModelRegistry.whisperModels.any { it.name.equals(modelName, ignoreCase = true) }
+                if (isWhisper) {
+                    val current = _whisperModelStates.value.toMutableMap()
+                    current[modelName] = state
+                    _whisperModelStates.value = current
+                } else {
+                    val current = _llmModelStates.value.toMutableMap()
+                    current[modelName] = state
+                    _llmModelStates.value = current
+                }
+            }
+        }
+    }
+
     init {
         scanLocalVideos()
         loadSubtitleSettings()
+        refreshModelStatuses()
     }
 
     private fun loadSubtitleSettings() {
@@ -641,7 +685,7 @@ class SubtitlePlayerViewModel(
             _isProcessingAI.value = true
             _aiResultText.value = null
             
-            val response = LocalLLMEngine.translateSubtitles(subtitles, targetLang)
+            val response = LocalLLMEngine.translateSubtitles(getApplication(), subtitles, targetLang)
             
             subtitleRepository.deleteSubtitlesForVideo(video.id)
             subtitleRepository.insertSubtitles(response)

@@ -4,7 +4,7 @@ import com.example.data.localai.model.RagChunk
 import com.example.data.model.SubtitleBlock
 import kotlin.math.log10
 
-object TranscriptIndexer {
+object TfIdfIndexer {
     private val stopWords = setOf(
         "the", "a", "an", "and", "or", "but", "is", "are", "was", "were", "to", "of", "in", "for", "on", "with", "at", "by", "from"
     )
