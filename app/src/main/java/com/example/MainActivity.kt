@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,34 +44,68 @@ import com.example.ui.screens.VideoLibraryScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.SubtitlePlayerViewModel
 import com.example.ui.viewmodel.SubtitlePlayerViewModelFactory
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.LaunchedEffect
 
 class MainActivity : ComponentActivity() {
+    private var shouldEnterPiP = false
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (shouldEnterPiP) {
+            val params = android.app.PictureInPictureParams.Builder().build()
+            enterPictureInPictureMode(params)
+        }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         setContent {
-            MyApplicationTheme {
-                // Fetch Application context to pass to factory
-                val app = application as SubtitleApplication
-                val factory = remember {
-                    SubtitlePlayerViewModelFactory(
-                        app,
-                        app.videoRepository,
-                        app.subtitleRepository
-                    )
-                }
+            val app = application as SubtitleApplication
+            val factory = remember {
+                SubtitlePlayerViewModelFactory(
+                    app,
+                    app.videoRepository,
+                    app.subtitleRepository
+                )
+            }
 
-                // Initialize main ViewModel
-                val viewModel: SubtitlePlayerViewModel = viewModel(factory = factory)
+            // Initialize main ViewModel
+            val viewModel: SubtitlePlayerViewModel = viewModel(factory = factory)
+            val themeMode by viewModel.themeMode.collectAsState()
 
+            MyApplicationTheme(themeMode = themeMode) {
                 // Track active visual screen route
                 var currentScreen by remember { mutableStateOf("HOME") }
                 val selectedVideo by viewModel.selectedVideo.collectAsState()
 
+                LaunchedEffect(currentScreen) {
+                    shouldEnterPiP = currentScreen == "PLAYER"
+                }
+
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val activity = context as? android.app.Activity
+
+                BackHandler(enabled = true) {
+                    when (currentScreen) {
+                        "PLAYER" -> {
+                            currentScreen = "LIBRARY"
+                        }
+                        "SETTINGS", "EXPORT" -> {
+                            currentScreen = "PLAYER"
+                        }
+                        else -> {
+                            activity?.finish()
+                        }
+                    }
+                }
+
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    containerColor = Color(0xFF0F172A),
+                    containerColor = MaterialTheme.colorScheme.background,
                     bottomBar = {
                         // Display bottom nav bar only for root screens
                         val showNav = currentScreen in listOf("HOME", "LIBRARY", "GENERATOR", "EDITOR")

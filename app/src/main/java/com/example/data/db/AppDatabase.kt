@@ -8,11 +8,14 @@ import androidx.room.TypeConverters
 import com.example.data.model.SubtitleBlock
 import com.example.data.model.VideoFile
 
-@Database(entities = [VideoFile::class, SubtitleBlock::class], version = 1, exportSchema = false)
+@Database(entities = [VideoFile::class, SubtitleBlock::class, PlaybackHistory::class, SubtitleCache::class, SubtitleSettings::class], version = 1, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun videoDao(): VideoDao
     abstract fun subtitleDao(): SubtitleDao
+    abstract fun playbackHistoryDao(): PlaybackHistoryDao
+    abstract fun subtitleCacheDao(): SubtitleCacheDao
+    abstract fun subtitleSettingsDao(): SubtitleSettingsDao
 
     companion object {
         @Volatile

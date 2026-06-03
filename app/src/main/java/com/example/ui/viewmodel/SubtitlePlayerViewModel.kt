@@ -7,7 +7,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.SubtitleApplication
-import com.example.data.api.GeminiSubtitleService
+import com.example.data.localai.LocalLLMEngine
+import com.example.data.localai.LocalRagPipeline
+import com.example.data.localai.model.RagChunk
 import com.example.data.model.ChapterMarker
 import com.example.data.model.SubtitleBlock
 import com.example.data.model.SubtitlePosition
@@ -23,23 +25,63 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import android.provider.MediaStore
 import android.content.ContentUris
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import com.example.data.db.PlaybackHistory
+import com.example.data.db.SubtitleSettings
 
+private data class VideoSearchParams(val query: String, val folder: String?, val favOnly: Boolean, val sort: String)
+
+@kotlinx.coroutines.ExperimentalCoroutinesApi
 class SubtitlePlayerViewModel(
     application: Application,
     private val videoRepository: VideoRepository,
     private val subtitleRepository: SubtitleRepository
 ) : AndroidViewModel(application) {
 
+    // --- DB DAO Access ---
+    private val database = getApplication<SubtitleApplication>().database
+    private val historyDao = database.playbackHistoryDao()
+    private val cacheDao = database.subtitleCacheDao()
+    private val settingsDao = database.subtitleSettingsDao()
+
     // --- Video Library Streams ---
     val allVideos: StateFlow<List<VideoFile>> = videoRepository.allVideos
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentVideos: StateFlow<List<VideoFile>> = videoRepository.recentVideos
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Search, Filter & Sort States ---
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery = _searchQuery.asStateFlow()
+
+    private val _selectedFolder = MutableStateFlow<String?>(null)
+    val selectedFolder = _selectedFolder.asStateFlow()
+
+    private val _showFavoritesOnly = MutableStateFlow(false)
+    val showFavoritesOnly = _showFavoritesOnly.asStateFlow()
+
+    private val _sortBy = MutableStateFlow("DATE_ADDED") // "NAME_AZ", "NAME_ZA", "DATE_ADDED", "DURATION", "SIZE"
+    val sortBy = _sortBy.asStateFlow()
+
+    val filteredVideos: StateFlow<List<VideoFile>> = combine(
+        searchQuery,
+        selectedFolder,
+        showFavoritesOnly,
+        sortBy
+    ) { query, folder, favOnly, sort ->
+        VideoSearchParams(query, folder, favOnly, sort)
+    }.flatMapLatest { params ->
+        videoRepository.getVideosSearchSort(params.query, params.folder, params.favOnly, params.sort)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val distinctFolders: StateFlow<List<String>> = videoRepository.getDistinctFolders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // --- Subtitle Track for current video ---
@@ -61,6 +103,9 @@ class SubtitlePlayerViewModel(
     private val _playbackSpeed = MutableStateFlow(1.0f)
     val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
 
+    private val _subtitleOffsetMs = MutableStateFlow(0L)
+    val subtitleOffsetMs: StateFlow<Long> = _subtitleOffsetMs.asStateFlow()
+
     private val _subtitlesEnabled = MutableStateFlow(true)
     val subtitlesEnabled: StateFlow<Boolean> = _subtitlesEnabled.asStateFlow()
 
@@ -81,8 +126,74 @@ class SubtitlePlayerViewModel(
     private val _aiResultText = MutableStateFlow<String?>(null)
     val aiResultText: StateFlow<String?> = _aiResultText.asStateFlow()
 
+    private val _themeMode = MutableStateFlow("SYSTEM")
+    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+
+    // --- Chat Message structure ---
+    data class ChatMessage(
+        val text: String,
+        val isUser: Boolean,
+        val timestampMs: Long = System.currentTimeMillis()
+    )
+
+    private val localRagPipeline = LocalRagPipeline()
+
+    private val _chatHistory = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatHistory: StateFlow<List<ChatMessage>> = _chatHistory.asStateFlow()
+
+    private val _ragSearchResults = MutableStateFlow<List<RagChunk>>(emptyList())
+    val ragSearchResults: StateFlow<List<RagChunk>> = _ragSearchResults.asStateFlow()
+
+    fun askQuestionAboutVideo(question: String) {
+        if (question.trim().isEmpty()) return
+        
+        val userMsg = ChatMessage(text = question, isUser = true)
+        _chatHistory.update { it + userMsg }
+        
+        viewModelScope.launch {
+            _isProcessingAI.value = true
+            
+            // Search RAG chunks
+            val matchingChunks = localRagPipeline.search(question)
+            
+            // Generate answer
+            val answer = LocalLLMEngine.answerQuestion(question, matchingChunks)
+            
+            val aiMsg = ChatMessage(text = answer, isUser = false)
+            _chatHistory.update { it + aiMsg }
+            _isProcessingAI.value = false
+        }
+    }
+
+    fun searchSubtitlesLocal(query: String) {
+        viewModelScope.launch {
+            val results = localRagPipeline.search(query)
+            _ragSearchResults.value = results
+        }
+    }
+
+    fun clearChatHistory() {
+        _chatHistory.value = emptyList()
+    }
+
     init {
         scanLocalVideos()
+        loadSubtitleSettings()
+    }
+
+    private fun loadSubtitleSettings() {
+        viewModelScope.launch {
+            val settings = settingsDao.getSettings() ?: SubtitleSettings()
+            _themeMode.value = settings.themeMode
+            _subtitleStyle.value = SubtitleStyle(
+                fontSizeSp = settings.fontSize,
+                fontFamily = settings.fontFamily,
+                textColorHex = settings.fontColorHex,
+                backgroundColorHex = settings.backgroundColorHex,
+                backgroundOpacity = settings.backgroundOpacity,
+                position = SubtitlePosition.valueOf(settings.position)
+            )
+        }
     }
 
     private suspend fun prepopulateDatabase() {
@@ -152,7 +263,8 @@ class SubtitlePlayerViewModel(
                 MediaStore.Video.Media.DISPLAY_NAME,
                 MediaStore.Video.Media.DURATION,
                 MediaStore.Video.Media.SIZE,
-                MediaStore.Video.Media.MIME_TYPE
+                MediaStore.Video.Media.MIME_TYPE,
+                MediaStore.Video.Media.DATA
             )
             
             val queryUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -170,6 +282,7 @@ class SubtitlePlayerViewModel(
                     val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
                     val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
                     val mimeTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
+                    val dataColumn = cursor.getColumnIndex(MediaStore.Video.Media.DATA)
                     
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idColumn)
@@ -177,6 +290,10 @@ class SubtitlePlayerViewModel(
                         val duration = cursor.getLong(durationColumn)
                         val size = cursor.getLong(sizeColumn)
                         val mimeType = cursor.getString(mimeTypeColumn) ?: "video/*"
+                        val path = if (dataColumn != -1) cursor.getString(dataColumn) ?: "" else ""
+                        val file = java.io.File(path)
+                        val folderName = file.parentFile?.name ?: "Unknown"
+                        val fileExtension = file.extension
                         
                         val contentUri = ContentUris.withAppendedId(
                             MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
@@ -190,7 +307,11 @@ class SubtitlePlayerViewModel(
                                 duration = duration,
                                 fileSize = size,
                                 mimeType = mimeType,
-                                hasSubtitles = false
+                                hasSubtitles = false,
+                                path = path,
+                                folderName = folderName,
+                                fileExtension = fileExtension,
+                                isFavorite = false
                             )
                         )
                     }
@@ -199,22 +320,59 @@ class SubtitlePlayerViewModel(
                 Log.e("ViewModel", "Failed to query MediaStore", e)
             }
             
+            val existingVideos = videoRepository.allVideos.first()
+            val existingUris = existingVideos.map { it.uri }.toSet()
+            
+            // Delete hardcoded demo videos if we found actual local videos
             if (localVideos.isNotEmpty()) {
-                val existingVideos = videoRepository.allVideos.first()
-                val existingUris = existingVideos.map { it.uri }.toSet()
-                
-                // Delete hardcoded demo videos if we found actual local videos
                 existingVideos.forEach { video ->
                     if (video.uri.startsWith("https://commondatastorage.googleapis.com/")) {
                         videoRepository.deleteVideo(video)
                     }
                 }
-                
-                localVideos.forEach { video ->
-                    if (video.uri !in existingUris) {
-                        videoRepository.insertVideo(video)
-                    }
+            }
+            
+            val localUris = localVideos.map { it.uri }.toSet()
+            
+            // Delete videos that no longer exist
+            existingVideos.forEach { video ->
+                if (!video.uri.startsWith("https://commondatastorage.googleapis.com/") && video.uri !in localUris) {
+                    videoRepository.deleteVideo(video)
                 }
+            }
+            
+            // Add new videos incrementally
+            localVideos.forEach { video ->
+                if (video.uri !in existingUris) {
+                    videoRepository.insertVideo(video)
+                }
+            }
+        }
+    }
+
+    // --- Library Search, Sort, Filter Actions ---
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun selectFolder(folder: String?) {
+        _selectedFolder.value = folder
+    }
+
+    fun toggleFavoritesOnly(enabled: Boolean) {
+        _showFavoritesOnly.value = enabled
+    }
+
+    fun updateSortOrder(sort: String) {
+        _sortBy.value = sort
+    }
+
+    fun toggleFavorite(video: VideoFile) {
+        viewModelScope.launch {
+            val updated = video.copy(isFavorite = !video.isFavorite)
+            videoRepository.updateVideo(updated)
+            if (_selectedVideo.value?.id == video.id) {
+                _selectedVideo.value = updated
             }
         }
     }
@@ -224,11 +382,20 @@ class SubtitlePlayerViewModel(
         _selectedVideo.value = video
         _activeSubtitle.value = null
         _playbackSpeed.value = 1.0f
+        _subtitleOffsetMs.value = 0L
+        clearChatHistory()
         
-        // Fetch subtitles associated with this video
         viewModelScope.launch {
             subtitleRepository.getSubtitlesForVideo(video.id).collect { blocks ->
                 _currentSubtitles.value = blocks
+                localRagPipeline.indexSubtitles(blocks)
+            }
+        }
+
+        viewModelScope.launch {
+            historyDao.getHistoryForVideo(video.id)?.let { history ->
+                _playbackSpeed.value = history.speed
+                _subtitleOffsetMs.value = history.subtitleOffsetMs
             }
         }
     }
@@ -251,6 +418,16 @@ class SubtitlePlayerViewModel(
 
     fun updateVideoLastPlayed(videoId: Long, positionMs: Long) {
         viewModelScope.launch {
+            val currentSpeed = _playbackSpeed.value
+            val currentOffset = _subtitleOffsetMs.value
+            val history = historyDao.getHistoryForVideo(videoId)
+            val updatedHistory = if (history != null) {
+                history.copy(positionMs = positionMs, speed = currentSpeed, subtitleOffsetMs = currentOffset, lastPlayedTime = System.currentTimeMillis())
+            } else {
+                PlaybackHistory(videoId, positionMs, currentSpeed, currentOffset)
+            }
+            historyDao.insertOrUpdateHistory(updatedHistory)
+
             videoRepository.getVideoById(videoId)?.let { video ->
                 videoRepository.updateVideo(video.copy(lastPlayedPosition = positionMs))
             }
@@ -266,13 +443,15 @@ class SubtitlePlayerViewModel(
             }
             videoRepository.deleteVideo(video)
             subtitleRepository.deleteSubtitlesForVideo(video.id)
+            historyDao.deleteHistoryForVideo(video.id)
         }
     }
 
     // --- Subtitle Track Sync ---
     fun updatePlayerTime(timeMs: Long) {
+        val adjustedTime = timeMs + _subtitleOffsetMs.value
         val match = _currentSubtitles.value.firstOrNull {
-            timeMs >= it.startTimeMs && timeMs <= it.endTimeMs
+            adjustedTime >= it.startTimeMs && adjustedTime <= it.endTimeMs
         }
         if (_activeSubtitle.value != match) {
             _activeSubtitle.value = match
@@ -296,11 +475,48 @@ class SubtitlePlayerViewModel(
             backgroundOpacity = backgroundOpacity,
             position = position
         )
+        viewModelScope.launch {
+            settingsDao.saveSettings(
+                SubtitleSettings(
+                    id = 1,
+                    fontSize = fontSizeSp,
+                    fontFamily = fontFamily,
+                    fontColorHex = textColorHex,
+                    backgroundColorHex = backgroundColorHex,
+                    backgroundOpacity = backgroundOpacity,
+                    position = position.name,
+                    isBold = false,
+                    themeMode = _themeMode.value
+                )
+            )
+        }
+    }
+
+    fun updateThemeMode(theme: String) {
+        _themeMode.value = theme
+        viewModelScope.launch {
+            val current = settingsDao.getSettings() ?: SubtitleSettings()
+            settingsDao.saveSettings(current.copy(themeMode = theme))
+        }
     }
 
     // --- Player Controller Values ---
     fun updatePlaybackSpeed(speed: Float) {
         _playbackSpeed.value = speed
+        val video = _selectedVideo.value ?: return
+        viewModelScope.launch {
+            val history = historyDao.getHistoryForVideo(video.id) ?: PlaybackHistory(video.id, 0L, speed, 0L)
+            historyDao.insertOrUpdateHistory(history.copy(speed = speed))
+        }
+    }
+
+    fun updateSubtitleOffset(offsetMs: Long) {
+        _subtitleOffsetMs.value = offsetMs
+        val video = _selectedVideo.value ?: return
+        viewModelScope.launch {
+            val history = historyDao.getHistoryForVideo(video.id) ?: PlaybackHistory(video.id, 0L, _playbackSpeed.value, offsetMs)
+            historyDao.insertOrUpdateHistory(history.copy(subtitleOffsetMs = offsetMs))
+        }
     }
 
     fun toggleSubtitles(enabled: Boolean) {
@@ -414,8 +630,7 @@ class SubtitlePlayerViewModel(
         }
     }
 
-
-    // --- Advanced Gemini AI Content Interceptors ---
+    // --- Advanced Local LLM AI Actions ---
 
     fun translateSubtitlesWithGemini(targetLang: String) {
         val video = _selectedVideo.value ?: return
@@ -426,17 +641,12 @@ class SubtitlePlayerViewModel(
             _isProcessingAI.value = true
             _aiResultText.value = null
             
-            // Generate standard raw SRT for model context
-            val rawSrt = subtitleRepository.convertToSrt(subtitles)
-            val response = GeminiSubtitleService.translateSubtitles(rawSrt, targetLang)
+            val response = LocalLLMEngine.translateSubtitles(subtitles, targetLang)
             
-            if (response.startsWith("Error:") || response.startsWith("API Key")) {
-                _aiResultText.value = "Translation Failed: $response"
-            } else {
-                // Parse generated translation blocks back to DB
-                parseAndCacheTranslatedSrt(video.id, response)
-                _aiResultText.value = "Successfully translated track into $targetLang!"
-            }
+            subtitleRepository.deleteSubtitlesForVideo(video.id)
+            subtitleRepository.insertSubtitles(response)
+            
+            _aiResultText.value = "Successfully translated track into $targetLang!"
             _isProcessingAI.value = false
         }
     }
@@ -535,8 +745,7 @@ class SubtitlePlayerViewModel(
             _isProcessingAI.value = true
             _aiResultText.value = null
             
-            val rawSrt = subtitleRepository.convertToSrt(subtitles)
-            val response = GeminiSubtitleService.generateSummary(rawSrt)
+            val response = LocalLLMEngine.generateSummary(subtitles)
             
             _aiResultText.value = response
             _isProcessingAI.value = false
@@ -558,8 +767,7 @@ class SubtitlePlayerViewModel(
             _isProcessingAI.value = true
             _aiResultText.value = null
             
-            val rawSrt = subtitleRepository.convertToSrt(subtitles)
-            val keywords = GeminiSubtitleService.extractKeywords(rawSrt)
+            val keywords = LocalLLMEngine.extractKeywords(subtitles)
             
             _aiResultText.value = if (keywords.isEmpty()) "No tags extracted." else "Keywords extracted:\n\n" + keywords.joinToString(", ")
             _isProcessingAI.value = false
@@ -581,13 +789,12 @@ class SubtitlePlayerViewModel(
             _isProcessingAI.value = true
             _aiResultText.value = null
 
-            val rawSrt = subtitleRepository.convertToSrt(subtitles)
-            val response = GeminiSubtitleService.generateChapters(rawSrt)
+            val response = LocalLLMEngine.generateChapters(subtitles)
             
             _aiResultText.value = response
             _isProcessingAI.value = false
 
-            if (!response.contains("Error:") && !response.contains("API Key")) {
+            if (response.isNotEmpty()) {
                 // Parse chapters to ChapterMarker list
                 val markers = parseChapterMarkers(response)
                 _selectedVideo.value?.let { video ->

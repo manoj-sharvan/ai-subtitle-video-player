@@ -20,7 +20,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.api.GeminiSubtitleService
 import com.example.data.model.VideoFile
 import com.example.ui.viewmodel.SubtitlePlayerViewModel
 
@@ -256,27 +255,10 @@ fun GeneratorScreen(
 
                 if (video.hasSubtitles) {
                         item {
-                            // Online Translation Tool / Advanced Gemini Features
                             Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))) {
                                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Text("Advanced AI Studio Actions", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Use Cloud Gemini 3.5 Flash to automatically process transcripts, summarize content, or translate subtitles directly.", color = Color.Gray, fontSize = 12.sp)
-
-                                    if (!GeminiSubtitleService.isApiKeyAvailable()) {
-                                        Card(
-                                            colors = CardDefaults.cardColors(containerColor = Color.Red.copy(alpha = 0.15f)),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Red)
-                                                Spacer(modifier = Modifier.width(12.dp))
-                                                Text("Note: Add GEMINI_API_KEY inside the Secrets panel to fully unlock these features!", color = Color.White, fontSize = 11.sp)
-                                            }
-                                        }
-                                    }
+                                    Text("Advanced Local AI Actions", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Use on-device local LLM (Qwen/Phi) to automatically translate subtitles, generate summaries, keywords, or chapters offline.", color = Color.Gray, fontSize = 12.sp)
 
                                     // Action buttons grid
                                     Row(

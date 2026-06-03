@@ -24,6 +24,14 @@ class VideoRepository(private val videoDao: VideoDao) {
         videoDao.deleteVideo(video)
     }
 
+    fun getVideosSearchSort(query: String, folderName: String?, favoritesOnly: Boolean, sortBy: String): Flow<List<VideoFile>> {
+        return videoDao.getVideosSearchSort(query, folderName, favoritesOnly, sortBy)
+    }
+
+    fun getDistinctFolders(): Flow<List<String>> {
+        return videoDao.getDistinctFolders()
+    }
+
     suspend fun clearAll() {
         videoDao.clearAll()
     }

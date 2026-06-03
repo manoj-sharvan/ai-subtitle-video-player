@@ -32,6 +32,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val subtitleStyle by viewModel.subtitleStyle.collectAsState()
+    val themeMode by viewModel.themeMode.collectAsState()
 
     val colorsAvailable = listOf(
         "#FFFFFF" to "White",
@@ -263,6 +264,31 @@ fun SettingsScreen(
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Text(pos.name, fontSize = 11.sp, color = Color.White)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- App Theme Switcher ---
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("App Theme Mode", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
+                                    Button(
+                                        onClick = { viewModel.updateThemeMode(mode) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (themeMode == mode) Color(0xFF3B82F6) else Color(0xFF334155)
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(mode, fontSize = 11.sp, color = Color.White)
                                     }
                                 }
                             }
