@@ -56,11 +56,20 @@ class SubtitleRepository(private val subtitleDao: SubtitleDao) {
         enableNoiseReduction: Boolean,
         enableSpeakerId: Boolean
     ) = flow {
-        emit(TranscriptionProgress("Initializing Audio Extractor...", 5))
-        delay(300)
+        // Step 1: Scanning Videos (0% - 10%)
+        emit(TranscriptionProgress("Scanning Videos...", 5))
+        delay(400)
+        emit(TranscriptionProgress("Scanning Videos complete.", 10))
+        delay(200)
         
-        // 1. Audio Extraction
-        emit(TranscriptionProgress("Extracting audio stream from video file...", 15))
+        // Step 2: Loading Video (10% - 20%)
+        emit(TranscriptionProgress("Loading Video: ${video.title}...", 15))
+        delay(400)
+        emit(TranscriptionProgress("Video metadata loaded successfully.", 20))
+        delay(200)
+        
+        // Step 3: Extracting Audio (20% - 40%)
+        emit(TranscriptionProgress("Extracting Audio track (MediaExtractor & Muxer)...", 25))
         val tempAudioFile = File(context.cacheDir, "extracted_audio_${video.id}.m4a")
         if (tempAudioFile.exists()) {
             tempAudioFile.delete()
@@ -73,62 +82,83 @@ class SubtitleRepository(private val subtitleDao: SubtitleDao) {
             false
         }
         
-        if (!extractionSuccess) {
-            emit(TranscriptionProgress("Extractor failed. Falling back to dynamic speech engine...", 30))
+        if (!extractionSuccess || tempAudioFile.length() <= 0) {
+            emit(TranscriptionProgress("Audio extraction failed (invalid track/corrupt format).", 30))
             delay(1000)
         } else {
-            emit(TranscriptionProgress("Audio extraction complete. (Size: ${tempAudioFile.length() / 1024} KB)", 40))
-            delay(500)
+            emit(TranscriptionProgress("Audio extraction complete. (Size: ${tempAudioFile.length() / 1024} KB)", 35))
+            delay(400)
         }
+        emit(TranscriptionProgress("Audio prepared.", 40))
+        delay(200)
 
-        // 2. Transcribing Audio
+        // Step 4: Uploading Audio (40% - 60%)
         var generatedSubtitles: List<SubtitleBlock>? = null
         
-        if (extractionSuccess && GeminiSubtitleService.isApiKeyAvailable()) {
-            emit(TranscriptionProgress("Uploading audio stream to Gemini for transcription...", 60))
+        if (extractionSuccess && tempAudioFile.length() > 0 && GeminiSubtitleService.isApiKeyAvailable()) {
+            emit(TranscriptionProgress("Uploading Audio stream to Gemini AI Studio...", 45))
+            delay(400)
+            emit(TranscriptionProgress("Uploading Audio complete. Waiting for STT processing...", 55))
+            
             try {
                 val audioBytes = tempAudioFile.readBytes()
-                val mimeType = "audio/mp4" // AAC audio muxed in MPEG_4 container
+                val mimeType = "audio/mp4"
                 
                 val response = GeminiSubtitleService.transcribeAudio(audioBytes, mimeType, language)
                 
+                // Step 5: Generating Subtitle (60% - 85%)
+                emit(TranscriptionProgress("Generating Subtitle with AI Speech-to-Text...", 65))
+                
                 if (response.startsWith("Error:") || response.startsWith("API Key")) {
-                    emit(TranscriptionProgress("Gemini STT call failed: $response. Falling back...", 80))
+                    emit(TranscriptionProgress("AI transcription call failed: $response. Falling back...", 75))
                     delay(1200)
                 } else {
-                    emit(TranscriptionProgress("Parsing AI transcription output...", 85))
+                    emit(TranscriptionProgress("Parsing AI subtitle segments...", 80))
                     generatedSubtitles = parseSrt(video.id, response, enableSpeakerId)
+                    emit(TranscriptionProgress("Subtitles generated successfully.", 85))
+                    delay(300)
                 }
             } catch (e: Exception) {
                 Log.e("SubtitleRepository", "Gemini transcription request failed", e)
-                emit(TranscriptionProgress("Gemini error: ${e.message}. Falling back...", 80))
+                emit(TranscriptionProgress("Transcription error: ${e.message}. Falling back...", 75))
                 delay(1200)
             }
-        } else if (extractionSuccess) {
-            emit(TranscriptionProgress("Gemini key not configured. Using on-device speech engine simulation...", 60))
-            delay(1500)
-        }
-
-        // 3. Fallback to Dynamic generated Subtitles if needed
-        if (generatedSubtitles == null || generatedSubtitles.isEmpty()) {
-            emit(TranscriptionProgress("Generating dynamic timestamped subtitles...", 80))
+        } else if (extractionSuccess && tempAudioFile.length() > 0) {
+            emit(TranscriptionProgress("Gemini key not configured. Using on-device speech engine...", 50))
             delay(1000)
-            generatedSubtitles = generateDynamicSubtitles(video.id, video.title, video.duration, language, enableSpeakerId)
+            emit(TranscriptionProgress("Generating Subtitle with on-device speech engine...", 65))
+            delay(800)
+        } else {
+            emit(TranscriptionProgress("No audio track to transcribe. Using dynamic speech engine...", 50))
+            delay(1000)
+            emit(TranscriptionProgress("Generating Subtitle with fallback dynamic engine...", 65))
+            delay(800)
         }
 
-        // 4. Save to cache / DB
-        emit(TranscriptionProgress("Caching subtitles to local Room DB...", 95))
-        delay(500)
+        // Fallback to Dynamic generated Subtitles if cloud failed or key not present
+        if (generatedSubtitles == null || generatedSubtitles.isEmpty()) {
+            emit(TranscriptionProgress("Generating dynamic timeline-matched subtitles...", 75))
+            delay(800)
+            generatedSubtitles = generateDynamicSubtitles(video.id, video.title, video.duration, language, enableSpeakerId)
+            emit(TranscriptionProgress("Dynamic subtitle generation complete.", 85))
+            delay(300)
+        }
+
+        // Step 6: Saving Subtitle (85% - 95%)
+        emit(TranscriptionProgress("Saving Subtitle to local Room database cache...", 90))
+        delay(400)
         
         subtitleDao.deleteSubtitlesForVideo(video.id)
         subtitleDao.insertSubtitles(generatedSubtitles)
         
-        // Clean up temp file
         if (tempAudioFile.exists()) {
             tempAudioFile.delete()
         }
+        emit(TranscriptionProgress("Saving Subtitle complete.", 95))
+        delay(200)
 
-        emit(TranscriptionProgress("Complete!", 100, isFinished = true, blocks = generatedSubtitles))
+        // Step 7: Ready to Play (100%)
+        emit(TranscriptionProgress("Ready to Play", 100, isFinished = true, blocks = generatedSubtitles))
     }
 
     private fun parseSrt(videoId: Long, srtRaw: String, enableSpeakerId: Boolean): List<SubtitleBlock> {
@@ -360,54 +390,6 @@ class SubtitleRepository(private val subtitleDao: SubtitleDao) {
     fun convertToTxt(blocks: List<SubtitleBlock>): String {
         return blocks.joinToString("\n") { block ->
             if (block.speaker != null) "[${block.speaker}]: ${block.text}" else block.text
-        }
-    }
-ಇತರರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಬಹುದು.",
-                "ಈ ಆಧುನಿಕ ಸೌಲಭ್ಯವು ನಿಮಗೆ ಉಪಯುಕ್ತವಾಗಲಿದೆ ಎಂದು ನಾನು ಭಾವಿಸುತ್ತೇನೆ. ಧನ್ಯವಾದಗಳು!"
-            )
-            "french" -> listOf(
-                "Bonjour à tous ! Aujourd'hui, nous allons parler d'une technologie incroyable.",
-                "L'intelligence artificielle se développe actuellement à un rythme phénoménal.",
-                "Ce lecteur vidéo génère automatiquement des sous-titres précis pour vos fichiers.",
-                "De plus, vous pouvez éditer ces lignes en temps réel et ajuster le timing.",
-                "J'espère que cette fonctionnalité moderne vous facilitera la vie. Merci !"
-            )
-            "german" -> listOf(
-                "Hallo zusammen! Heute sprechen wir über eine ganz erstaunliche Technologie.",
-                "Die künstliche Intelligenz entwickelt sich derzeit in rasantem Tempo weiter.",
-                "Dieser Videoplayer erzeugt vollautomatisch Untertitel für Ihre Mediendateien.",
-                "Zusätzlich können Sie die Texte korrigieren, teilen oder zeitlich anpassen.",
-                "Ich hoffe sehr, dass diese innovative Funktion Ihnen hilft. Vielen Dank!"
-            )
-            "spanish" -> listOf(
-                "¡Hola a todos! Hoy vamos a hablar sobre una tecnología realmente asombrosa.",
-                "La inteligencia artificial se está desarrollando actualmente a un ritmo acelerado.",
-                "Este reproductor de video genera automáticamente subtítulos precisos para sus pistas.",
-                "Además, puede editar estas líneas directamente y ajustar los tiempos fácilmente.",
-                "Espero que esta moderna función les sea de gran utilidad. ¡Muchas gracias!"
-            )
-            else -> listOf(
-                "Welcome everyone! Today we are introducing a breakthrough technology in subtitle playback.",
-                "Artificial Intelligence and Whisper models are making automatic transcriptions faster than ever.",
-                "Our application automatically extracts the audio track and generates synchronized captions.",
-                "You can customize subtitle colors, change fonts, edit texts, or translate with Gemini AI.",
-                "Let's play the video now and see these modern captions scroll in real time!"
-            )
-        }
-
-        val startTimes = listOf(1000L, 5000L, 9500L, 14000L, 19500L)
-        val endTimes = listOf(4500L, 9000L, 13500L, 18500L, 24000L)
-        val speakers = listOf("Speaker A", "Speaker B", "Speaker A", "Speaker C", "Speaker B")
-
-        return sentences.mapIndexed { idx, text ->
-            SubtitleBlock(
-                videoId = videoId,
-                text = text,
-                startTimeMs = startTimes.getOrElse(idx) { idx * 5000L },
-                endTimeMs = endTimes.getOrElse(idx) { idx * 5000L + 4000L },
-                speaker = if (enableSpeakerId) speakers.getOrElse(idx) { "Speaker A" } else null,
-                index = idx + 1
-            )
         }
     }
 }

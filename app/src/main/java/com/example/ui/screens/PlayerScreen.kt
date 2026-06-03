@@ -149,7 +149,68 @@ fun PlayerScreen(
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val stepsList = listOf(
+                            "Scanning Videos" to 10,
+                            "Loading Video" to 20,
+                            "Extracting Audio" to 40,
+                            "Uploading Audio" to 60,
+                            "Generating Subtitle" to 85,
+                            "Saving Subtitle" to 95,
+                            "Ready to Play" to 100
+                        )
+                        
+                        stepsList.forEachIndexed { index, step ->
+                            val targetPercent = step.second
+                            val stepName = step.first
+                            val prevTarget = if (index > 0) stepsList[index - 1].second else 0
+                            
+                            val isCompleted = progressPercent >= targetPercent
+                            val isActive = progressPercent > prevTarget && progressPercent < targetPercent
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = if (isCompleted) Icons.Default.CheckCircle else if (isActive) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
+                                        contentDescription = null,
+                                        tint = if (isCompleted) Color(0xFF10B981) else if (isActive) Color(0xFFEC4899) else Color.Gray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = stepName,
+                                        color = if (isCompleted || isActive) Color.White else Color.Gray,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                                if (isActive) {
+                                    CircularProgressIndicator(
+                                        color = Color(0xFFEC4899),
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(32.dp))
                 Button(
                     onClick = { onNavigate("LIBRARY") },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
