@@ -142,4 +142,74 @@ object GeminiSubtitleService {
         if (response.contains("Error:") || response.contains("API Key")) return emptyList()
         return response.split(",").map { it.trim() }.filter { it.isNotEmpty() }
     }
+
+    /**
+     * Upload base64 encoded audio track to Gemini 3.5 Flash for speech-to-text transcription.
+     * Returns raw SRT format from the model.
+     */
+    suspend fun transcribeAudio(audioBytes: ByteArray, mimeType: String, language: String): String = withContext(Dispatchers.IO) {
+        val apiKey = getApiKey()
+        if (!isApiKeyAvailable()) {
+            return@withContext "API Key not configured. Please add GEMINI_API_KEY inside AI Studio Secrets."
+        }
+        
+        try {
+            val base64Data = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP)
+            
+            val requestJson = JSONObject()
+            val contentsArray = org.json.JSONArray()
+            val contentObj = JSONObject()
+            val partsArray = org.json.JSONArray()
+            
+            // Audio inline data part
+            val audioPart = JSONObject()
+            val inlineData = JSONObject()
+            inlineData.put("mimeType", mimeType)
+            inlineData.put("data", base64Data)
+            audioPart.put("inlineData", inlineData)
+            partsArray.put(audioPart)
+            
+            // Transcription prompt part
+            val textPart = JSONObject()
+            textPart.put("text", "Listen to this audio track and generate highly accurate subtitles in SRT format. " +
+                "Language requested: $language. Do not summarize, transcribe exactly what is spoken. " +
+                "Output ONLY the raw SRT format content. Do not include any other markdown formatting or introductory text.")
+            partsArray.put(textPart)
+            
+            contentObj.put("parts", partsArray)
+            contentsArray.put(contentObj)
+            requestJson.put("contents", contentsArray)
+            
+            val configObj = JSONObject()
+            configObj.put("temperature", 0.2)
+            requestJson.put("generationConfig", configObj)
+            
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val body = requestJson.toString().toRequestBody(mediaType)
+            
+            val request = Request.Builder()
+                .url("$BASE_URL?key=$apiKey")
+                .post(body)
+                .build()
+                
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext "Error: Direct HTTP call unsuccessful (${response.code})"
+                }
+                val bodyStr = response.body?.string() ?: return@withContext "Error: Empty response body"
+                
+                val responseJson = JSONObject(bodyStr)
+                val candidates = responseJson.optJSONArray("candidates")
+                val firstCandidate = candidates?.optJSONObject(0)
+                val content = firstCandidate?.optJSONObject("content")
+                val parts = content?.optJSONArray("parts")
+                val firstPart = parts?.optJSONObject(0)
+                
+                firstPart?.optString("text") ?: "No content text generated"
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Audio transcription failed", e)
+            "Error: ${e.message}"
+        }
+    }
 }

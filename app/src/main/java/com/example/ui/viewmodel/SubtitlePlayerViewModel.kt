@@ -22,6 +22,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import android.provider.MediaStore
+import android.content.ContentUris
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 
 class SubtitlePlayerViewModel(
     application: Application,
@@ -76,14 +82,7 @@ class SubtitlePlayerViewModel(
     val aiResultText: StateFlow<String?> = _aiResultText.asStateFlow()
 
     init {
-        // Pre-populate database with popular trailers if database is empty
-        viewModelScope.launch {
-            videoRepository.allVideos.collect { videos ->
-                if (videos.isEmpty()) {
-                    prepopulateDatabase()
-                }
-            }
-        }
+        scanLocalVideos()
     }
 
     private suspend fun prepopulateDatabase() {
@@ -128,6 +127,94 @@ class SubtitlePlayerViewModel(
                     SubtitleBlock(videoId = videoId, text = "Translate with Gemini, segment speech, or extract high-value markers.", startTimeMs = 19000L, endTimeMs = 24000L, speaker = "Speaker B", index = 5)
                 )
                 subtitleRepository.insertSubtitles(sampleSubs)
+            }
+        }
+    }
+
+    fun scanLocalVideos() {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val permission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                Manifest.permission.READ_MEDIA_VIDEO
+            } else {
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+            
+            val hasPermission = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) {
+                Log.d("ViewModel", "No permission to scan local videos")
+                return@launch
+            }
+            
+            val localVideos = mutableListOf<VideoFile>()
+            val projection = arrayOf(
+                MediaStore.Video.Media._ID,
+                MediaStore.Video.Media.DISPLAY_NAME,
+                MediaStore.Video.Media.DURATION,
+                MediaStore.Video.Media.SIZE,
+                MediaStore.Video.Media.MIME_TYPE
+            )
+            
+            val queryUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            
+            try {
+                context.contentResolver.query(
+                    queryUri,
+                    projection,
+                    null,
+                    null,
+                    "${MediaStore.Video.Media.DATE_ADDED} DESC"
+                )?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                    val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+                    val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+                    val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+                    val mimeTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
+                    
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idColumn)
+                        val name = cursor.getString(nameColumn)
+                        val duration = cursor.getLong(durationColumn)
+                        val size = cursor.getLong(sizeColumn)
+                        val mimeType = cursor.getString(mimeTypeColumn) ?: "video/*"
+                        
+                        val contentUri = ContentUris.withAppendedId(
+                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                            id
+                        ).toString()
+                        
+                        localVideos.add(
+                            VideoFile(
+                                title = name,
+                                uri = contentUri,
+                                duration = duration,
+                                fileSize = size,
+                                mimeType = mimeType,
+                                hasSubtitles = false
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Failed to query MediaStore", e)
+            }
+            
+            if (localVideos.isNotEmpty()) {
+                val existingVideos = videoRepository.allVideos.first()
+                val existingUris = existingVideos.map { it.uri }.toSet()
+                
+                // Delete hardcoded demo videos if we found actual local videos
+                existingVideos.forEach { video ->
+                    if (video.uri.startsWith("https://commondatastorage.googleapis.com/")) {
+                        videoRepository.deleteVideo(video)
+                    }
+                }
+                
+                localVideos.forEach { video ->
+                    if (video.uri !in existingUris) {
+                        videoRepository.insertVideo(video)
+                    }
+                }
             }
         }
     }
@@ -184,10 +271,12 @@ class SubtitlePlayerViewModel(
 
     // --- Subtitle Track Sync ---
     fun updatePlayerTime(timeMs: Long) {
-        val matches = _currentSubtitles.value.filter {
+        val match = _currentSubtitles.value.firstOrNull {
             timeMs >= it.startTimeMs && timeMs <= it.endTimeMs
         }
-        _activeSubtitle.value = matches.firstOrNull()
+        if (_activeSubtitle.value != match) {
+            _activeSubtitle.value = match
+        }
     }
 
     // --- Subtitle Properties Customization ---
@@ -232,7 +321,8 @@ class SubtitlePlayerViewModel(
             _transcriptionStep.value = "Starting transcoder..."
 
             subtitleRepository.transcribeVideo(
-                videoId = video.id,
+                context = getApplication(),
+                video = video,
                 language = language,
                 isOfflineMode = isOfflineMode,
                 enableNoiseReduction = enableNoiseReduction,

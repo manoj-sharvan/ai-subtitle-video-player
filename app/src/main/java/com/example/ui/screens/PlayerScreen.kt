@@ -42,6 +42,10 @@ fun PlayerScreen(
     val playbackSpeed by viewModel.playbackSpeed.collectAsState()
     val subtitlesEnabled by viewModel.subtitlesEnabled.collectAsState()
 
+    val isTranscribing by viewModel.isTranscribing.collectAsState()
+    val progressPercent by viewModel.transcriptionProgress.collectAsState()
+    val currentStep by viewModel.transcriptionStep.collectAsState()
+
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
@@ -77,6 +81,87 @@ fun PlayerScreen(
     }
 
     val video = selectedVideo!!
+
+    // Auto-transcribe if selected local video doesn't have subtitles generated yet
+    LaunchedEffect(video.id) {
+        if (!video.hasSubtitles && !isTranscribing) {
+            viewModel.startTranscription(
+                video = video,
+                language = "English",
+                isOfflineMode = true,
+                enableNoiseReduction = true,
+                enableSpeakerId = true
+            )
+        }
+    }
+
+    if (!video.hasSubtitles || isTranscribing) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color(0xFF0F172A)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = "AI Processing",
+                    tint = Color(0xFFEC4899),
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    "AI Subtitle Generator",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Automatically generating synchronized captions for your local video...",
+                    color = Color.Gray,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                CircularProgressIndicator(
+                    progress = progressPercent / 100f,
+                    color = Color(0xFFEC4899),
+                    strokeWidth = 6.dp,
+                    modifier = Modifier.size(80.dp)
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "$progressPercent%",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = currentStep,
+                    color = Color.Gray,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(48.dp))
+                Button(
+                    onClick = { onNavigate("LIBRARY") },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                ) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Back to Library", color = Color.White)
+                }
+            }
+        }
+        return
+    }
 
     Box(
         modifier = modifier

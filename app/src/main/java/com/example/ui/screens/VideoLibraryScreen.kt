@@ -23,6 +23,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.VideoFile
 import com.example.ui.viewmodel.SubtitlePlayerViewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.os.Build
+import android.Manifest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,6 +40,34 @@ fun VideoLibraryScreen(
 ) {
     val videos by viewModel.allVideos.collectAsState()
     var showImportDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_VIDEO
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasPermission = isGranted
+        if (isGranted) {
+            viewModel.scanLocalVideos()
+        }
+    }
+    
+    LaunchedEffect(hasPermission) {
+        if (hasPermission) {
+            viewModel.scanLocalVideos()
+        }
+    }
 
     Box(
         modifier = modifier
@@ -45,6 +80,15 @@ fun VideoLibraryScreen(
                 title = { Text("Video Library", color = Color.White, fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E293B)),
                 actions = {
+                    if (hasPermission) {
+                        IconButton(onClick = { viewModel.scanLocalVideos() }) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Scan Local Videos",
+                                tint = Color.White
+                            )
+                        }
+                    }
                     Button(
                         onClick = { showImportDialog = true },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
@@ -55,6 +99,49 @@ fun VideoLibraryScreen(
                     }
                 }
             )
+
+            if (!hasPermission) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Default.Security,
+                            contentDescription = "Permission required",
+                            tint = Color(0xFFF59E0B),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Local Storage Access Required",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Please grant permission to scan and play video files stored locally on your device.",
+                            color = Color.Gray,
+                            fontSize = 12.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = { permissionLauncher.launch(permission) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                        ) {
+                            Text("Grant Permission", color = Color.White)
+                        }
+                    }
+                }
+            }
 
             if (videos.isEmpty()) {
                 Box(
